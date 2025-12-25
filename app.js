@@ -24,6 +24,7 @@
     let stopped = false;
     let startTime = 0;
     let rafId = null;
+    let timeoutId = null;
 
     const setButtonState = () => {
       playPauseBtn.classList.remove("is-playing", "is-paused", "is-replay");
@@ -51,7 +52,7 @@
         panel.style.display = isActive ? "block" : "none";
         panel.setAttribute("aria-hidden", String(!isActive));
       });
-      panelCount.textContent = `Panel ${currentIndex + 1} of ${totalPanels}`;
+      panelCount.textContent = `${currentIndex + 1} of ${totalPanels}`;
       updateHash();
       resetProgress();
       setButtonState();
@@ -73,6 +74,10 @@
       if (rafId) {
         cancelAnimationFrame(rafId);
       }
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
       resetProgress();
       setButtonState();
     };
@@ -81,6 +86,10 @@
       autoplay = false;
       if (rafId) {
         cancelAnimationFrame(rafId);
+      }
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
       }
       setButtonState();
     };
@@ -95,7 +104,11 @@
       stopped = false;
       startTime = performance.now();
       setButtonState();
-      if (!prefersReducedMotion) {
+      if (prefersReducedMotion) {
+        const panel = panels[currentIndex];
+        const duration = Number(panel.dataset.duration) || 15000;
+        timeoutId = setTimeout(() => goNext(false), duration);
+      } else {
         rafId = requestAnimationFrame(step);
       }
     };
@@ -127,9 +140,18 @@
       if (currentIndex < totalPanels - 1) {
         currentIndex += 1;
         updatePanelDisplay();
-        if (autoplay && !prefersReducedMotion) {
-          startTime = performance.now();
-          rafId = requestAnimationFrame(step);
+        if (autoplay) {
+          if (prefersReducedMotion) {
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+            }
+            const panel = panels[currentIndex];
+            const duration = Number(panel.dataset.duration) || 15000;
+            timeoutId = setTimeout(() => goNext(false), duration);
+          } else {
+            startTime = performance.now();
+            rafId = requestAnimationFrame(step);
+          }
         }
       } else {
         stopAutoplay();
@@ -225,6 +247,7 @@
     const exportBtn = document.getElementById("exportData");
     const importInput = document.getElementById("importData");
     const clearAllBtn = document.getElementById("clearAll");
+    const sessionIndicator = document.getElementById("sessionIndicator");
 
     const practiceView = document.querySelector('.view[data-view="practice"]');
     const stateBlocks = practiceView ? practiceView.querySelectorAll("[data-state]") : [];
@@ -342,6 +365,11 @@
       primaryBtn.textContent = isActiveSession ? "End Session" : "Start Session";
     };
 
+    const setSessionIndicator = (on) => {
+      if (!sessionIndicator) return;
+      sessionIndicator.hidden = !on;
+    };
+
     const setStatus = (message) => {
       practiceStatus.textContent = message;
       if (statusTimer) {
@@ -361,6 +389,7 @@
       clearSelections();
       isActiveSession = true;
       updatePrimaryBtn();
+      setSessionIndicator(true);
       renderState("active");
       setStatus("Your practice session has started.");
     };
@@ -372,6 +401,7 @@
       sessionSummary.textContent = `Session length: ${formatDuration(frozenDurationSec)}`;
       isActiveSession = false;
       updatePrimaryBtn();
+      setSessionIndicator(false);
       renderState("checkin");
       setStatus("Your practice session has ended.");
     };
@@ -389,6 +419,7 @@
       frozenDurationSec = null;
       isActiveSession = false;
       updatePrimaryBtn();
+      setSessionIndicator(false);
       clearSelections();
       renderState("idle");
       setStatus("");
@@ -535,7 +566,16 @@
     };
 
     viewButtons.forEach((button) => {
-      button.addEventListener("click", () => setView(button.dataset.view));
+      button.addEventListener("click", () => {
+        const targetView = button.dataset.view;
+        if (isActiveSession && targetView !== "practice") {
+          const ok = window.confirm(
+            "You’re about to leave your session. Do you want to proceed?"
+          );
+          if (!ok) return;
+        }
+        setView(targetView);
+      });
     });
 
     primaryBtn.addEventListener("click", () => {
@@ -616,6 +656,13 @@
       });
     renderState("idle");
     updatePrimaryBtn();
+    setSessionIndicator(false);
+
+    window.addEventListener("beforeunload", (event) => {
+      if (!isActiveSession) return;
+      event.preventDefault();
+      event.returnValue = "";
+    });
   };
 
   const page = document.body.dataset.page;
